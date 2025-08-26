@@ -1,11 +1,12 @@
 /* ReportSearch.css */
 
 .report-search {
-    background: var(--bg-secondary, #f8f9fa);
+    background: var(--bg-primary, white);
     border: 1px solid var(--border-color, #e9ecef);
     border-radius: 12px;
-    padding: 16px;
-    margin-bottom: 20px;
+    padding: 20px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
 .search-main {
