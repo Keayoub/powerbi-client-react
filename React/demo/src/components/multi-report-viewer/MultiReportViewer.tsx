@@ -3,7 +3,7 @@
 
 import React, { useState } from 'react';
 import { models, Report } from 'powerbi-client';
-import { PowerBIEmbed } from 'powerbi-client-react';
+import { OptimizedPowerBIEmbed } from '../optimized-powerbi/OptimizedPowerBIEmbed';
 import { BookmarkManager } from '../features/BookmarkManager';
 import { ReportActions } from '../features/ReportActions';
 import './MultiReportViewer.css';
@@ -152,6 +152,8 @@ export const MultiReportViewer: React.FC<MultiReportViewerProps> = ({
                                     onLoaded={() => handleReportLoaded(report.id)}
                                     onError={(error) => handleReportError(report.id, error)}
                                     showControls={false}
+                                    layout={layout}
+                                    gridColumns={gridColumns}
                                 />
                             </div>
                         ))}
@@ -173,6 +175,8 @@ export const MultiReportViewer: React.FC<MultiReportViewerProps> = ({
                             onGetEmbedded={(embeddedReport) => handleGetEmbedded(report.id, embeddedReport)}
                             onShowBookmarks={() => setShowBookmarkManager(report.id)}
                             showControls={true}
+                            layout={layout}
+                            gridColumns={gridColumns}
                         />
                     ))}
                 </div>
@@ -220,6 +224,8 @@ interface ReportPanelProps {
     onGetEmbedded?: (embeddedReport: Report) => void;
     onShowBookmarks?: () => void;
     showControls: boolean;
+    layout?: 'grid' | 'tabs' | 'stack';
+    gridColumns?: number;
 }
 
 const ReportPanel: React.FC<ReportPanelProps> = ({
@@ -230,7 +236,9 @@ const ReportPanel: React.FC<ReportPanelProps> = ({
     onError,
     onGetEmbedded,
     onShowBookmarks,
-    showControls
+    showControls,
+    layout = 'grid',
+    gridColumns = 2
 }) => {
     const [isExpanded, setIsExpanded] = useState(true);
 
@@ -286,19 +294,22 @@ const ReportPanel: React.FC<ReportPanelProps> = ({
             
             {isExpanded && (
                 <div className="panel-content">
-                    <PowerBIEmbed
-                        embedConfig={report.embedConfig}
-                        eventHandlers={
-                            new Map([
-                                ['loaded', onLoaded],
-                                ['error', onError],
-                            ])
-                        }
-                        cssClassName="powerbi-frame"
-                        getEmbeddedComponent={(embeddedComponent) => {
-                            if (onGetEmbedded) {
-                                onGetEmbedded(embeddedComponent as Report);
-                            }
+                    <OptimizedPowerBIEmbed
+                        reportId={report.id}
+                        embedUrl={report.embedUrl}
+                        accessToken={report.accessToken}
+                        className="multi-report-frame"
+                        onLoaded={onLoaded}
+                        onError={onError}
+                        onDataSelected={(event) => {
+                            console.log(`Data selected in report ${report.id}:`, event);
+                        }}
+                        options={{
+                            enableExport: true,
+                            enablePrint: true,
+                            enableFullscreen: true,
+                            hideFilters: false,
+                            hidePageNavigation: layout === 'grid' && gridColumns > 2 // Cache navigation si grille dense
                         }}
                     />
                 </div>

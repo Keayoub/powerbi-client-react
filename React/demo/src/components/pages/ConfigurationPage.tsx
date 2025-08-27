@@ -8,6 +8,8 @@ import { EmbeddedReport } from '../multi-report-viewer/MultiReportViewer';
 import { IFrameReport } from '../iframe-report-viewer/IFrameReportViewer';
 import { DebugPanel } from '../debug-panel/DebugPanel';
 import { ReportSearch } from '../features/ReportSearch';
+import { DashboardTileSelector, EmbeddedDashboard, EmbeddedTile } from '../features/DashboardTileSelector';
+import { BookmarkSelector } from '../features/BookmarkSelector';
 import './ConfigurationPage.css';
 
 export const ConfigurationPage: React.FC = () => {
@@ -16,6 +18,8 @@ export const ConfigurationPage: React.FC = () => {
     // Shared state for collected reports
     const [embeddedReports, setEmbeddedReports] = useState<EmbeddedReport[]>([]);
     const [iframeReports, setIframeReports] = useState<IFrameReport[]>([]);
+    const [embeddedDashboards, setEmbeddedDashboards] = useState<EmbeddedDashboard[]>([]);
+    const [embeddedTiles, setEmbeddedTiles] = useState<EmbeddedTile[]>([]);
     
     // Configuration settings
     const [multiReportMode, setMultiReportMode] = useState<boolean>(true);
@@ -26,15 +30,53 @@ export const ConfigurationPage: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState<string>('');
     const [searchFilters, setSearchFilters] = useState<any>({});
     
-    const allReports = [...embeddedReports, ...iframeReports];
+    const allReports = [...embeddedReports, ...iframeReports, ...embeddedDashboards, ...embeddedTiles];
+    
+    // Extract unique workspace names for filtering
+    const availableWorkspaces = Array.from(new Set(allReports.map(report => report.workspaceName)));
+    
     const filteredReports = allReports.filter(report => {
         // Basic search filtering
         const matchesSearch = !searchTerm || 
             report.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             report.workspaceName.toLowerCase().includes(searchTerm.toLowerCase());
         
-        // Additional filters can be applied here
-        return matchesSearch;
+        // Workspace filter
+        const matchesWorkspace = !searchFilters.workspace || 
+            report.workspaceName === searchFilters.workspace;
+        
+        // Type filter - categorize by report type
+        const matchesType = !searchFilters.type || 
+            (searchFilters.type === 'Report' && ('reportType' in report)) ||
+            (searchFilters.type === 'Dashboard' && ('type' in report && report.type === 'dashboard')) ||
+            (searchFilters.type === 'Tile' && ('type' in report && report.type === 'tile'));
+        
+        // Date range filter - use addedAt date
+        const matchesDateRange = !searchFilters.dateRange || (() => {
+            if (!('addedAt' in report)) return true;
+            
+            const reportDate = new Date(report.addedAt);
+            const now = new Date();
+            
+            switch (searchFilters.dateRange) {
+                case 'today':
+                    return reportDate.toDateString() === now.toDateString();
+                case 'week':
+                    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                    return reportDate >= weekAgo;
+                case 'month':
+                    const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                    return reportDate >= monthAgo;
+                default:
+                    return true;
+            }
+        })();
+        
+        // Favorite filter (placeholder - would need favorites persistence)
+        const matchesFavorite = !searchFilters.favorite || 
+            ('isFavorite' in report ? report.isFavorite : false);
+        
+        return matchesSearch && matchesWorkspace && matchesType && matchesDateRange && matchesFavorite;
     });
     
     const handleReportAdded = (report: EmbeddedReport) => {
@@ -67,10 +109,42 @@ export const ConfigurationPage: React.FC = () => {
         });
     };
 
+    const handleDashboardAdded = (dashboard: EmbeddedDashboard) => {
+        setEmbeddedDashboards(prev => {
+            if (prev.some(d => d.id === dashboard.id)) {
+                return prev;
+            }
+            const newDashboards = [...prev, dashboard];
+            
+            if (autoNavigate) {
+                navigate('/reports');
+            }
+            
+            return newDashboards;
+        });
+    };
+
+    const handleTileAdded = (tile: EmbeddedTile) => {
+        setEmbeddedTiles(prev => {
+            if (prev.some(t => t.id === tile.id)) {
+                return prev;
+            }
+            const newTiles = [...prev, tile];
+            
+            if (autoNavigate) {
+                navigate('/reports');
+            }
+            
+            return newTiles;
+        });
+    };
+
     const handleGoToReports = () => {
         // Pass the reports via sessionStorage for the ReportViewerPage
         sessionStorage.setItem('embeddedReports', JSON.stringify(embeddedReports));
         sessionStorage.setItem('iframeReports', JSON.stringify(iframeReports));
+        sessionStorage.setItem('embeddedDashboards', JSON.stringify(embeddedDashboards));
+        sessionStorage.setItem('embeddedTiles', JSON.stringify(embeddedTiles));
         sessionStorage.setItem('viewerConfig', JSON.stringify({
             multiReportMode,
             iframeMode
@@ -78,7 +152,7 @@ export const ConfigurationPage: React.FC = () => {
         navigate('/reports');
     };
 
-    const totalReports = embeddedReports.length + iframeReports.length;
+    const totalReports = embeddedReports.length + iframeReports.length + embeddedDashboards.length + embeddedTiles.length;
 
     return (
         <div className="configuration-page">
@@ -111,6 +185,7 @@ export const ConfigurationPage: React.FC = () => {
                     onFilterChange={setSearchFilters}
                     totalReports={allReports.length}
                     filteredReports={filteredReports.length}
+                    availableWorkspaces={availableWorkspaces}
                 />
                 
                 <div className="config-content-inner">
@@ -260,6 +335,8 @@ export const ConfigurationPage: React.FC = () => {
                             iframeMode={iframeMode}
                             onReportAdded={handleReportAdded}
                             onIFrameReportAdded={handleIFrameReportAdded}
+                            onDashboardAdded={handleDashboardAdded}
+                            onTileAdded={handleTileAdded}
                         />
                     </div>
                 </div>

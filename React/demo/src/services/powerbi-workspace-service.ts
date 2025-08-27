@@ -43,10 +43,51 @@ export interface PowerBIReport {
     modifiedBy: string;
 }
 
+export interface PowerBIDashboard {
+    id: string;
+    displayName: string;
+    isReadOnly: boolean;
+    webUrl: string;
+    embedUrl: string;
+}
+
+export interface PowerBITile {
+    id: string;
+    title: string;
+    subTitle: string;
+    reportId: string;
+    datasetId: string;
+    embedUrl: string;
+    embedData: string;
+    rowSpan: number;
+    colSpan: number;
+}
+
 export class PowerBIWorkspaceService {
+    private static instance: PowerBIWorkspaceService | null = null;
     private baseUrl = 'https://api.powerbi.com/v1.0/myorg';
 
     constructor(private accessToken: string) {}
+
+    /**
+     * Get singleton instance of the service
+     */
+    static getInstance(accessToken?: string): PowerBIWorkspaceService {
+        if (!PowerBIWorkspaceService.instance && accessToken) {
+            PowerBIWorkspaceService.instance = new PowerBIWorkspaceService(accessToken);
+        }
+        if (!PowerBIWorkspaceService.instance) {
+            throw new Error('PowerBIWorkspaceService instance not initialized. Call getInstance with accessToken first.');
+        }
+        return PowerBIWorkspaceService.instance;
+    }
+
+    /**
+     * Update access token for existing instance
+     */
+    updateAccessToken(accessToken: string): void {
+        this.accessToken = accessToken;
+    }
 
     /**
      * Get all workspaces the user has access to
@@ -258,6 +299,128 @@ export class PowerBIWorkspaceService {
             return data.token;
         } catch (error) {
             console.error('Error generating embed token:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get all dashboards in a specific workspace
+     */
+    async getDashboards(workspaceId?: string): Promise<PowerBIDashboard[]> {
+        try {
+            const url = workspaceId 
+                ? `${this.baseUrl}/groups/${workspaceId}/dashboards`
+                : `${this.baseUrl}/dashboards`;
+
+            const response = await fetch(url, {
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch dashboards: ${response.status} ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            return data.value || [];
+        } catch (error) {
+            console.error('Error fetching dashboards:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get all tiles for a specific dashboard
+     */
+    async getTiles(dashboardId: string, workspaceId?: string): Promise<PowerBITile[]> {
+        try {
+            const url = workspaceId 
+                ? `${this.baseUrl}/groups/${workspaceId}/dashboards/${dashboardId}/tiles`
+                : `${this.baseUrl}/dashboards/${dashboardId}/tiles`;
+
+            const response = await fetch(url, {
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch tiles: ${response.status} ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            return data.value || [];
+        } catch (error) {
+            console.error('Error fetching tiles:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Generate embed token for dashboard
+     */
+    async generateDashboardEmbedToken(dashboardId: string, workspaceId?: string): Promise<string> {
+        try {
+            const url = workspaceId 
+                ? `${this.baseUrl}/groups/${workspaceId}/dashboards/${dashboardId}/GenerateToken`
+                : `${this.baseUrl}/dashboards/${dashboardId}/GenerateToken`;
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    accessLevel: 'View'
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Failed to generate dashboard embed token: ${response.status} ${response.statusText} - ${errorText}`);
+            }
+
+            const data = await response.json();
+            return data.token;
+        } catch (error) {
+            console.error('Error generating dashboard embed token:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Generate embed token for tile
+     */
+    async generateTileEmbedToken(dashboardId: string, tileId: string, workspaceId?: string): Promise<string> {
+        try {
+            const url = workspaceId 
+                ? `${this.baseUrl}/groups/${workspaceId}/dashboards/${dashboardId}/tiles/${tileId}/GenerateToken`
+                : `${this.baseUrl}/dashboards/${dashboardId}/tiles/${tileId}/GenerateToken`;
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    accessLevel: 'View'
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Failed to generate tile embed token: ${response.status} ${response.statusText} - ${errorText}`);
+            }
+
+            const data = await response.json();
+            return data.token;
+        } catch (error) {
+            console.error('Error generating tile embed token:', error);
             throw error;
         }
     }

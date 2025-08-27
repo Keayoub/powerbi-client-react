@@ -9,6 +9,7 @@ interface ReportSearchProps {
     onFilterChange: (filters: SearchFilters) => void;
     totalReports: number;
     filteredReports: number;
+    availableWorkspaces?: string[];
 }
 
 interface SearchFilters {
@@ -22,7 +23,8 @@ export const ReportSearch: React.FC<ReportSearchProps> = ({
     onSearchTermChange,
     onFilterChange,
     totalReports,
-    filteredReports
+    filteredReports,
+    availableWorkspaces = []
 }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [filters, setFilters] = useState<SearchFilters>({
@@ -114,11 +116,11 @@ export const ReportSearch: React.FC<ReportSearchProps> = ({
                                 className="filter-select"
                             >
                                 <option value="">All workspaces</option>
-                                <option value="My Workspace">My Workspace</option>
-                                <option value="Sales">Sales</option>
-                                <option value="Marketing">Marketing</option>
-                                <option value="Finance">Finance</option>
-                                <option value="Operations">Operations</option>
+                                {availableWorkspaces.map(workspace => (
+                                    <option key={workspace} value={workspace}>
+                                        {workspace}
+                                    </option>
+                                ))}
                             </select>
                         </div>
 

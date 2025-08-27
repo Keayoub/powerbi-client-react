@@ -4,6 +4,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { PowerBIWorkspaceService, PowerBIWorkspace, PowerBIDataset, PowerBIReport } from '../../services/powerbi-workspace-service';
+import { DashboardTileSelector } from '../features/DashboardTileSelector';
 import './WorkspaceBrowser.css';
 
 interface SelectedItem {
@@ -35,6 +36,8 @@ interface WorkspaceBrowserProps {
         reportType: string;
         addedAt: Date;
     }) => void;
+    onDashboardAdded?: (dashboard: any) => void;
+    onTileAdded?: (tile: any) => void;
     multiReportMode?: boolean;
     iframeMode?: boolean;
 }
@@ -44,10 +47,12 @@ export const WorkspaceBrowser: React.FC<WorkspaceBrowserProps> = ({
     onEmbedTokenGenerated,
     onReportAdded,
     onIFrameReportAdded,
+    onDashboardAdded,
+    onTileAdded,
     multiReportMode = false,
     iframeMode = false
 }) => {
-    const { powerBiToken, isAuthenticated } = useAuth();
+    const { powerBiToken, isAuthenticated, login, loading: authLoading, error: authError } = useAuth();
     const [workspaces, setWorkspaces] = useState<PowerBIWorkspace[]>([]);
     const [datasets, setDatasets] = useState<PowerBIDataset[]>([]);
     const [reports, setReports] = useState<PowerBIReport[]>([]);
@@ -60,6 +65,7 @@ export const WorkspaceBrowser: React.FC<WorkspaceBrowserProps> = ({
     
     const [expandedWorkspace, setExpandedWorkspace] = useState<string | null>(null);
     const [expandedDataset, setExpandedDataset] = useState<string | null>(null);
+    const [showDashboardTileSelector, setShowDashboardTileSelector] = useState(false);
 
     // Load workspaces when component mounts and user is authenticated
     useEffect(() => {
@@ -278,6 +284,18 @@ export const WorkspaceBrowser: React.FC<WorkspaceBrowserProps> = ({
             <div className="workspace-browser">
                 <div className="auth-required">
                     <p>Please sign in to browse Power BI workspaces</p>
+                    <button 
+                        className="sign-in-button"
+                        onClick={login}
+                        disabled={authLoading}
+                    >
+                        {authLoading ? 'Connecting...' : 'Sign In with Microsoft'}
+                    </button>
+                    {authError && (
+                        <div className="auth-error">
+                            <p>Error: {authError}</p>
+                        </div>
+                    )}
                 </div>
             </div>
         );
@@ -377,6 +395,23 @@ export const WorkspaceBrowser: React.FC<WorkspaceBrowserProps> = ({
                                             )}
                                         </div>
                                     ))}
+                                </div>
+                                
+                                {/* Dashboards and Tiles Section */}
+                                <div className="dashboards-section">
+                                    <h4>📊 Dashboards & Tiles</h4>
+                                    <div className="dashboard-tile-actions">
+                                        <button 
+                                            className="dashboard-tile-button"
+                                            onClick={() => setShowDashboardTileSelector(true)}
+                                            disabled={!powerBiToken}
+                                        >
+                                            🎛️ Browse Dashboards & Tiles
+                                        </button>
+                                        <p className="action-hint">
+                                            View and add individual dashboards or tiles from this workspace
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
                         )}
@@ -512,6 +547,29 @@ export const WorkspaceBrowser: React.FC<WorkspaceBrowserProps> = ({
                 <div className="no-workspaces">
                     <p>No workspaces found. You may need additional permissions to access Power BI workspaces.</p>
                 </div>
+            )}
+
+            {/* Dashboard and Tile Selector Modal */}
+            {showDashboardTileSelector && selectedWorkspace && powerBiToken && (
+                <DashboardTileSelector
+                    workspaceId={selectedWorkspace.id}
+                    workspaceName={selectedWorkspace.name}
+                    accessToken={powerBiToken}
+                    isVisible={showDashboardTileSelector}
+                    onClose={() => setShowDashboardTileSelector(false)}
+                    onDashboardAdded={(dashboard) => {
+                        if (onDashboardAdded) {
+                            onDashboardAdded(dashboard);
+                        }
+                        setShowDashboardTileSelector(false);
+                    }}
+                    onTileAdded={(tile) => {
+                        if (onTileAdded) {
+                            onTileAdded(tile);
+                        }
+                        setShowDashboardTileSelector(false);
+                    }}
+                />
             )}
         </div>
     );
