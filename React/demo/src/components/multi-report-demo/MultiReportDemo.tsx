@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { OptimizedPowerBIEmbed } from '../optimized-powerbi/OptimizedPowerBIEmbed';
+import { EmbeddedPowerBIContainer } from '../EmbeddedPowerBIContainer';
 import { useReportLoadManager } from '../../utils/report-load-manager';
 
 interface MultiReportDemoProps {
@@ -116,7 +116,7 @@ export const MultiReportDemo: React.FC<MultiReportDemoProps> = ({ reports }) => 
                                 </div>
                             </div>
                             
-                            <OptimizedPowerBIEmbed
+                            <EmbeddedPowerBIContainer
                                 reportId={report.id}
                                 embedUrl={report.embedUrl}
                                 accessToken={report.accessToken}
@@ -131,7 +131,7 @@ export const MultiReportDemo: React.FC<MultiReportDemoProps> = ({ reports }) => 
                                     console.log(`🎯 Report ${report.id} loaded in demo`);
                                     updateStatus();
                                 }}
-                                onError={(error) => {
+                                onError={(error: any) => {
                                     console.error(`🚨 Report ${report.id} failed in demo:`, error);
                                     updateStatus();
                                 }}

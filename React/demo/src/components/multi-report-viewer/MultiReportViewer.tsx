@@ -3,7 +3,7 @@
 
 import React, { useState } from 'react';
 import { models, Report } from 'powerbi-client';
-import { OptimizedPowerBIEmbed } from '../optimized-powerbi/OptimizedPowerBIEmbed';
+import { EmbeddedPowerBIContainer } from '../EmbeddedPowerBIContainer';
 import { BookmarkManager } from '../features/BookmarkManager';
 import { ReportActions } from '../features/ReportActions';
 import './MultiReportViewer.css';
@@ -294,23 +294,14 @@ const ReportPanel: React.FC<ReportPanelProps> = ({
             
             {isExpanded && (
                 <div className="panel-content">
-                    <OptimizedPowerBIEmbed
+                    <EmbeddedPowerBIContainer
                         reportId={report.id}
                         embedUrl={report.embedUrl}
                         accessToken={report.accessToken}
                         className="multi-report-frame"
                         onLoaded={onLoaded}
                         onError={onError}
-                        onDataSelected={(event) => {
-                            console.log(`Data selected in report ${report.id}:`, event);
-                        }}
-                        options={{
-                            enableExport: true,
-                            enablePrint: true,
-                            enableFullscreen: true,
-                            hideFilters: false,
-                            hidePageNavigation: layout === 'grid' && gridColumns > 2 // Cache navigation si grille dense
-                        }}
+                        height="400px"
                     />
                 </div>
             )}
