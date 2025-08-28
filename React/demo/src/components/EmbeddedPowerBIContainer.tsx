@@ -190,6 +190,14 @@ export const EmbeddedPowerBIContainer: React.FC<
   // Enhanced embed function with optimizations
   const embedReport = useCallback(async () => {
     if (!wrapperRef.current || !reportId || !embedUrl || !accessToken) {
+      const missingParams = [];
+      if (!reportId) missingParams.push('reportId');
+      if (!embedUrl) missingParams.push('embedUrl');
+      if (!accessToken) missingParams.push('accessToken');
+      
+      const errorMsg = `Missing required parameters: ${missingParams.join(', ')}`;
+      console.error("❌ Embed validation failed:", errorMsg);
+      setHasError(errorMsg);
       return;
     }
 
@@ -282,6 +290,12 @@ export const EmbeddedPowerBIContainer: React.FC<
         };
       }
 
+      // Debug logging for configuration
+      console.log(`🔧 Embed config for ${reportId}:`, {
+        ...config,
+        accessToken: config.accessToken ? `${config.accessToken.substring(0, 20)}...` : 'null'
+      });
+
       const report = powerbiService.embed(detachedContainer, config) as Report;
       reportRef.current = report;
 
@@ -298,27 +312,65 @@ export const EmbeddedPowerBIContainer: React.FC<
         onLoadedRef.current?.(report);
       });
 
-      report.on("error", (event) => {
-        console.error(`❌ Enhanced PowerBI error for ${reportId}:`, event);
-        setHasError("Enhanced PowerBI embedding error occurred");
+      report.on("error", (event: any) => {
+        const errorDetails = {
+          message: event?.detail?.message || event?.message || 'Unknown error',
+          code: event?.detail?.errorCode || event?.errorCode || 'UNKNOWN',
+          detail: event?.detail || event,
+          reportId: reportId
+        };
+        
+        console.error(`❌ Enhanced PowerBI error for ${reportId}:`, errorDetails);
+        
+        // More specific error message based on error code/type
+        let userFriendlyError = "Enhanced PowerBI embedding error occurred";
+        if (errorDetails.code?.includes('TokenExpired') || errorDetails.message?.includes('token')) {
+          userFriendlyError = "Access token expired or invalid";
+        } else if (errorDetails.code?.includes('NotFound') || errorDetails.message?.includes('not found')) {
+          userFriendlyError = "Report not found or access denied";
+        } else if (errorDetails.code?.includes('Unauthorized') || errorDetails.message?.includes('unauthorized')) {
+          userFriendlyError = "Unauthorized access to report";
+        } else if (errorDetails.message) {
+          userFriendlyError = `Error: ${errorDetails.message}`;
+        }
+        
+        setHasError(userFriendlyError);
         setIsLoading(false);
         isEmbeddingRef.current = false;
         globalActiveLoads = Math.max(0, globalActiveLoads - 1);
         processLoadQueue(); // Process any queued loads
-        onErrorRef.current?.(event);
+        onErrorRef.current?.(errorDetails);
       });
 
       if (wrapperRef.current) {
         wrapperRef.current.appendChild(detachedContainer);
       }
     } catch (error: any) {
-      console.error("❌ Enhanced embedding failed:", error);
-      setHasError(error?.message || "Failed to embed report");
+      const errorDetails = {
+        message: error?.message || 'Unknown embedding error',
+        stack: error?.stack,
+        name: error?.name,
+        reportId: reportId,
+        embedUrl: embedUrl ? embedUrl.substring(0, 50) + '...' : 'null'
+      };
+      
+      console.error("❌ Enhanced embedding failed:", errorDetails);
+      
+      let userFriendlyError = errorDetails.message || "Failed to embed report";
+      if (error?.message?.includes('Invalid embed url') || error?.message?.includes('embed URL')) {
+        userFriendlyError = "Invalid embed URL provided";
+      } else if (error?.message?.includes('Token') || error?.message?.includes('token')) {
+        userFriendlyError = "Access token issue - please check token validity";
+      } else if (error?.message?.includes('Service') || error?.message?.includes('service')) {
+        userFriendlyError = "PowerBI service initialization failed";
+      }
+      
+      setHasError(userFriendlyError);
       setIsLoading(false);
       isEmbeddingRef.current = false;
       globalActiveLoads = Math.max(0, globalActiveLoads - 1);
       processLoadQueue();
-      onErrorRef.current?.(error);
+      onErrorRef.current?.(errorDetails);
     }
   }, [reportId, embedUrl, accessToken, height, priority, resourceOptimization]);
 
