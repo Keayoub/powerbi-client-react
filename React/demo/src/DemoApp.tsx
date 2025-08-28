@@ -5,7 +5,7 @@ import React, { useState } from "react";
 import "./DemoApp.css";
 import { AuthProvider } from "./context/AuthContext";
 import { ReportSelectionPage } from "./components/ReportSelectionPage";
-import { MPATestPage } from "./pages/MPATestPage";
+import MPATestPage from "./pages/MPATestPage";
 
 /**
  * Simplified PowerBI Demo Application

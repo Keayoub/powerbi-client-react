@@ -15,475 +15,620 @@ interface OptimizedReport {
   priority: "high" | "normal" | "low";
   lazyLoad: boolean;
   addedAt: Date;
+  powerBiReportId?: string; // The actual Power BI report ID for embedding
 }
 
 interface PerformanceMetrics {
   loadTime: number;
-  renderTime: number;
+  priority: "high" | "normal" | "low";
+  lazyLoad: boolean;
+  timestamp: Date;
   totalReports: number;
   activeReports: number;
 }
 
-export function MPATestPage() {
+const MPATestPage: React.FC = () => {
   const [optimizedReports, setOptimizedReports] = useState<OptimizedReport[]>([]);
-  const [isRunning, setIsRunning] = useState(false);
-  const [selectedWorkspaceReport, setSelectedWorkspaceReport] = useState<{
-    embedUrl: string;
-    accessToken: string;
-    reportId: string;
-    name: string;
-    workspaceName: string;
-  } | null>(null);
-  const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics>({
-    loadTime: 0,
-    renderTime: 0,
-    totalReports: 0,
-    activeReports: 0
-  });
-  const [maxConcurrentLoads, setMaxConcurrentLoads] = useState(3);
-  const [resourceOptimization, setResourceOptimization] = useState({
-    disableAnimations: false,
-    reduceQuality: false,
-    limitRefreshRate: false
-  });
-  const testRunIdRef = useRef(0);
+  const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics[]>([]);
+  const [currentTestRun, setCurrentTestRun] = useState<number>(1);
+  const [isWorkspaceBrowserOpen, setIsWorkspaceBrowserOpen] = useState<boolean>(false);
+  const [embedError, setEmbedError] = useState<string | null>(null);
+  const [isAnalysisMode, setIsAnalysisMode] = useState<boolean>(false);
 
-  const addOptimizedReport = (priority: "high" | "normal" | "low" = "normal", lazyLoad: boolean = false, useWorkspaceReport: boolean = false) => {
-    let reportData;
-    
-    if (useWorkspaceReport && selectedWorkspaceReport) {
-      // Use real workspace report with proper ID extraction
-      const reportId = selectedWorkspaceReport.reportId || 
-                      selectedWorkspaceReport.embedUrl.split("reportId=")[1]?.split("&")[0] || 
-                      `workspace-${Date.now()}`;
-      
-      reportData = {
-        id: `optimized-${reportId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        name: `${selectedWorkspaceReport.name} (${priority})`,
-        embedUrl: selectedWorkspaceReport.embedUrl,
-        accessToken: selectedWorkspaceReport.accessToken,
-        workspaceName: selectedWorkspaceReport.workspaceName,
-        priority,
-        lazyLoad,
-        addedAt: new Date()
-      };
-      
-      console.log(`✅ Adding workspace report: ${reportData.name}`, {
-        reportId: reportId,
-        embedUrl: reportData.embedUrl,
-        hasToken: !!reportData.accessToken
-      });
-    } else {
-      // Use sample report data
-      reportData = {
-        id: `optimized-report-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        name: `Sample Report ${optimizedReports.length + 1} (${priority})`,
-        embedUrl: `https://app.powerbi.com/reportEmbed?reportId=sample-${optimizedReports.length + 1}`,
-        accessToken: "sample-access-token-optimized",
-        workspaceName: "Sample Workspace",
-        priority,
-        lazyLoad,
-        addedAt: new Date()
-      };
-      
-      console.log(`⚠️ Adding sample report: ${reportData.name} (no workspace report selected)`);
-    }
-    
-    const newReport: OptimizedReport = reportData;
-    setOptimizedReports(prev => [...prev, newReport]);
-    
-    setPerformanceMetrics(prev => ({
-      ...prev,
-      totalReports: prev.totalReports + 1,
-      activeReports: prev.activeReports + 1
-    }));
+  // References for performance tracking
+  const testRunIdRef = useRef<number>(0);
+  const reportStartTimesRef = useRef<Map<string, number>>(new Map());
+
+  // Store pending report configuration for workspace selection
+  const [pendingReportConfig, setPendingReportConfig] = useState<{priority: "high" | "normal" | "low", lazyLoad: boolean} | null>(null);
+
+  // Priority queue optimizations
+  const addOptimizedReport = (priority: "high" | "normal" | "low", lazyLoad: boolean) => {
+    // Always open workspace browser for report selection
+    setPendingReportConfig({ priority, lazyLoad });
+    setIsWorkspaceBrowserOpen(true);
   };
 
   const removeOptimizedReport = (reportId: string) => {
-    setOptimizedReports(prev => prev.filter(report => report.id !== reportId));
+    setOptimizedReports((prev: OptimizedReport[]) => prev.filter((report) => report.id !== reportId));
     
-    setPerformanceMetrics(prev => ({
-      ...prev,
-      totalReports: Math.max(0, prev.totalReports - 1),
-      activeReports: Math.max(0, prev.activeReports - 1)
-    }));
-  };
-
-  const handleReportLoaded = useCallback((reportId: string) => (report: any) => {
-    console.log(`✅ Optimized report ${reportId} loaded with singleton service:`, report);
-    const loadTime = Date.now();
-    setPerformanceMetrics(prev => ({
-      ...prev,
-      loadTime: loadTime,
-      renderTime: loadTime
-    }));
-  }, []);
-
-  const handleReportError = useCallback((reportId: string) => (error: any) => {
-    console.error(`❌ Optimized report ${reportId} error:`, error);
-  }, []);
-
-  const handleWorkspaceReportSelected = (report: any) => {
-    setSelectedWorkspaceReport({
-      embedUrl: report.embedUrl,
-      accessToken: report.accessToken,
-      reportId: report.reportId || report.id,
-      name: report.name,
-      workspaceName: report.workspaceName || "Selected Workspace"
-    });
-    console.log("✅ Workspace report selected for optimization testing:", report);
-  };
-
-  const runPerformanceTest = async () => {
-    if (isRunning) return;
+    // Clean up start time tracking
+    reportStartTimesRef.current.delete(reportId);
     
-    setIsRunning(true);
-    testRunIdRef.current += 1;
-    
-    try {
-      // Clear existing reports
-      setOptimizedReports([]);
-      setPerformanceMetrics({
-        loadTime: 0,
-        renderTime: 0,
-        totalReports: 0,
-        activeReports: 0
-      });
-
-      const startTime = Date.now();
-      const useWorkspace = selectedWorkspaceReport !== null;
-      
-      console.log(`🧪 Starting performance test with ${useWorkspace ? 'workspace' : 'sample'} reports`);
-      if (useWorkspace) {
-        console.log('📊 Using workspace report:', selectedWorkspaceReport);
-      }
-
-      // Add reports with different priorities - all using the same workspace report if available
-      console.log('Adding high priority report...');
-      addOptimizedReport("high", false, useWorkspace);
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      console.log('Adding normal priority lazy report...');
-      addOptimizedReport("normal", true, useWorkspace);
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      console.log('Adding low priority lazy report...');
-      addOptimizedReport("low", true, useWorkspace);
-      await new Promise(resolve => setTimeout(resolve, 200));
-      
-      console.log('Adding final normal priority report...');
-      addOptimizedReport("normal", false, useWorkspace);
-
-      const endTime = Date.now();
-      setPerformanceMetrics(prev => ({
-        ...prev,
-        loadTime: endTime - startTime
-      }));
-      
-      console.log(`✅ Performance test completed in ${endTime - startTime}ms`);
-
-    } finally {
-      setIsRunning(false);
-    }
+    setCurrentTestRun((prev: number) => prev + 1);
   };
 
   const clearAllReports = () => {
     setOptimizedReports([]);
-    setPerformanceMetrics({
-      loadTime: 0,
-      renderTime: 0,
-      totalReports: 0,
-      activeReports: 0
-    });
+    reportStartTimesRef.current.clear();
+    setPerformanceMetrics([]);
+    setCurrentTestRun(1);
+    testRunIdRef.current = 0;
   };
 
-  return (
-    <div className="mpa-test-page">
-      {/* Page Header */}
-      <div className="page-header">
-        <h2>🚀 Advanced Optimization & Singleton Implementation</h2>
-        <p>Test OptimizedPowerBIEmbed with singleton service, lazy loading, and performance optimization</p>
-      </div>
+  const handleReportLoaded = (reportId: string, priority: "high" | "normal" | "low", lazyLoad: boolean) => {
+    const currentTime = Date.now();
+    const startTime = reportStartTimesRef.current.get(reportId);
+    
+    if (startTime) {
+      // Calculate elapsed time properly (currentTime - startTime)
+      const loadTime = currentTime - startTime;
+      
+      setPerformanceMetrics((prev: PerformanceMetrics[]) => [
+        ...prev,
+        {
+          loadTime, // This is now elapsed time in milliseconds
+          priority,
+          lazyLoad,
+          timestamp: new Date(),
+          totalReports: optimizedReports.length,
+          activeReports: optimizedReports.length,
+        },
+      ]);
 
-      {/* Workspace Selection Section */}
-      <div className="workspace-selection-section">
-        <div className="section-header">
-          <h3>📁 Report Selection for Optimization Testing</h3>
-          <p>Select a real PowerBI report from your workspace to test optimization features</p>
-        </div>
-        
-        <div className="workspace-browser-container">
-          <div className="workspace-status">
-            {selectedWorkspaceReport ? (
-              <div className="selected-report-info">
-                <h4>✅ Selected Report: {selectedWorkspaceReport.name}</h4>
-                <p><strong>Workspace:</strong> {selectedWorkspaceReport.workspaceName}</p>
-                <p><strong>Report ID:</strong> {selectedWorkspaceReport.reportId}</p>
-                <button 
-                  className="action-button secondary"
-                  onClick={() => setSelectedWorkspaceReport(null)}
-                >
-                  🔄 Select Different Report
-                </button>
-              </div>
-            ) : (
-              <div className="no-selection-info">
-                <p>🎯 No report selected - using sample data for testing</p>
-                <p>Connect with your Microsoft ID below to select a real report:</p>
-              </div>
-            )}
-          </div>
-          
-          {!selectedWorkspaceReport && (
-            <WorkspaceBrowser
-              onEmbedTokenGenerated={(token, url) => {
-                // Extract report info from the URL and token
-                const reportId = url.split("reportId=")[1]?.split("&")[0] || "unknown";
-                handleWorkspaceReportSelected({
-                  embedUrl: url,
-                  accessToken: token,
-                  reportId: reportId,
-                  name: `Report ${reportId.substring(0, 8)}...`,
-                  workspaceName: "Selected Workspace"
-                });
-              }}
-              onReportAdded={handleWorkspaceReportSelected}
-              multiReportMode={false}
-              iframeMode={false}
-            />
-          )}
-        </div>
-      </div>
+      // Clean up the start time after recording
+      reportStartTimesRef.current.delete(reportId);
+    }
+  };
 
-      {/* Control Panel */}
-      <div className="optimization-controls">
-        <div className="control-section">
-          <h3>🎛️ Optimization Controls</h3>
-          
-          <div className="control-grid">
-            <div className="control-group">
-              <label>Max Concurrent Loads:</label>
-              <input
-                type="number"
-                value={maxConcurrentLoads}
-                onChange={(e) => setMaxConcurrentLoads(parseInt(e.target.value) || 3)}
-                min="1"
-                max="10"
-                className="form-input small"
-              />
-            </div>
-            
-            <div className="control-group">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={resourceOptimization.disableAnimations}
-                  onChange={(e) => setResourceOptimization(prev => ({
-                    ...prev,
-                    disableAnimations: e.target.checked
-                  }))}
-                />
-                Disable Animations
-              </label>
-            </div>
-            
-            <div className="control-group">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={resourceOptimization.reduceQuality}
-                  onChange={(e) => setResourceOptimization(prev => ({
-                    ...prev,
-                    reduceQuality: e.target.checked
-                  }))}
-                />
-                Reduce Quality
-              </label>
-            </div>
-            
-            <div className="control-group">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={resourceOptimization.limitRefreshRate}
-                  onChange={(e) => setResourceOptimization(prev => ({
-                    ...prev,
-                    limitRefreshRate: e.target.checked
-                  }))}
-                />
-                Limit Refresh Rate
-              </label>
-            </div>
-          </div>
-        </div>
+  const handleReportError = (reportId: string, error: any) => {
+    console.error(`Report ${reportId} failed to load:`, error);
+    setEmbedError(`Report ${reportId} failed to load: ${error.message || error}`);
+    
+    // Clean up start time even on error
+    reportStartTimesRef.current.delete(reportId);
+  };
 
-        <div className="action-buttons">
-          <button 
-            onClick={() => addOptimizedReport("high", false, selectedWorkspaceReport !== null)}
-            className="action-button primary"
-          >
-            ➕ Add High Priority Report {selectedWorkspaceReport ? "(Workspace)" : "(Sample)"}
-          </button>
-          <button 
-            onClick={() => addOptimizedReport("normal", true, selectedWorkspaceReport !== null)}
-            className="action-button secondary"
-          >
-            ➕ Add Normal Priority (Lazy) {selectedWorkspaceReport ? "(Workspace)" : "(Sample)"}
-          </button>
-          <button 
-            onClick={() => addOptimizedReport("low", true, selectedWorkspaceReport !== null)}
-            className="action-button secondary"
-          >
-            ➕ Add Low Priority (Lazy) {selectedWorkspaceReport ? "(Workspace)" : "(Sample)"}
-          </button>
-          <button 
-            onClick={runPerformanceTest}
-            className="action-button primary"
-            disabled={isRunning}
-          >
-            {isRunning ? "🔄 Running Test..." : `🧪 Run Performance Test ${selectedWorkspaceReport ? "(Workspace)" : "(Sample)"}`}
-          </button>
-          <button 
-            onClick={clearAllReports}
-            className="action-button danger"
-          >
-            🗑️ Clear All Reports
-          </button>
-        </div>
-      </div>
+  const reloadAllReports = () => {
+    console.log('🔄 Reloading all embedded reports...');
+    
+    // Clear any existing errors
+    setEmbedError(null);
+    
+    // Reset performance metrics for fresh tracking
+    setPerformanceMetrics([]);
+    
+    // Clear existing start times
+    reportStartTimesRef.current.clear();
+    
+    // Reset start times for all current reports
+    optimizedReports.forEach(report => {
+      reportStartTimesRef.current.set(report.id, Date.now());
+    });
+    
+    // Increment test run to trigger re-render of all components
+    setCurrentTestRun((prev: number) => prev + 1);
+    
+    console.log(`✅ Reloaded ${optimizedReports.length} reports`);
+  };
 
-      {/* Performance Metrics */}
-      <div className="performance-dashboard">
-        <h3>📊 Performance Dashboard</h3>
-        <div className="metrics-grid">
-          <div className="metric-card">
-            <h4>Load Time</h4>
-            <p>{performanceMetrics.loadTime}ms</p>
-          </div>
-          <div className="metric-card">
-            <h4>Active Reports</h4>
-            <p>{performanceMetrics.activeReports}</p>
-          </div>
-          <div className="metric-card">
-            <h4>Total Reports</h4>
-            <p>{performanceMetrics.totalReports}</p>
-          </div>
-          <div className="metric-card">
-            <h4>Concurrent Limit</h4>
-            <p>{maxConcurrentLoads}</p>
-          </div>
-          <div className="metric-card">
-            <h4>Report Source</h4>
-            <p>{selectedWorkspaceReport ? "🏢 Workspace" : "🧪 Sample"}</p>
-          </div>
-          <div className="metric-card">
-            <h4>Workspace Reports</h4>
-            <p>{selectedWorkspaceReport ? optimizedReports.length : 0} / {optimizedReports.length}</p>
-          </div>
-        </div>
-      </div>
+  const handleWorkspaceSelection = (token: string, embedUrl: string, selection: any) => {
+    testRunIdRef.current += 1;
+    const localReportId = `workspace-report-${testRunIdRef.current}`;
+    
+    // Record start time for performance tracking
+    reportStartTimesRef.current.set(localReportId, Date.now());
 
-      {/* Optimized Reports Section */}
-      <div className="optimized-reports-section">
-        <div className="section-header">
-          <h3>⚡ Multiple Reports with Stable Embedding</h3>
-          <p>Each report uses EmbeddedPowerBIContainer with complete DOM isolation</p>
-          <p><strong>DOM Mode:</strong> Isolated (No DOM conflicts - Stable Solution)</p>
-        </div>
+    // Use pending configuration or default to normal priority
+    const config = pendingReportConfig || { priority: "normal" as const, lazyLoad: false };
 
-        {optimizedReports.length === 0 ? (
-          <div className="no-reports-message">
-            <p>🎯 No optimized reports loaded</p>
-            <p>Add reports using the controls above to test the optimization features.</p>
-          </div>
-        ) : (
-          <div className="reports-grid optimized">
-            {optimizedReports.map((report) => (
-              <div key={report.id} className={`report-card optimized ${report.priority}`}>
-                <div className="report-header">
-                  <h4>{report.name}</h4>
-                  <div className="report-badges">
-                    <span className={`priority-badge ${report.priority}`}>
-                      {report.priority.toUpperCase()}
-                    </span>
-                    {report.lazyLoad && (
-                      <span className="lazy-badge">LAZY</span>
-                    )}
-                  </div>
-                  <button
-                    className="remove-report-btn"
-                    onClick={() => removeOptimizedReport(report.id)}
-                    title="Remove Report"
-                  >
-                    ❌
-                  </button>
-                </div>
-                
-                <div className="report-info">
-                  <p><strong>Workspace:</strong> {report.workspaceName}</p>
-                  <p><strong>Priority:</strong> {report.priority}</p>
-                  <p><strong>Lazy Load:</strong> {report.lazyLoad ? "Yes" : "No"}</p>
-                  <p><strong>Added:</strong> {report.addedAt.toLocaleTimeString()}</p>
-                </div>
-                
-                <div className="report-embed-container optimized">
-                  <PowerBIErrorBoundary>
-                    <EmbeddedPowerBIContainer
-                      reportId={report.embedUrl.split("reportId=")[1]?.split("&")[0] || report.id}
-                      embedUrl={report.embedUrl}
-                      accessToken={report.accessToken}
-                      onLoaded={handleReportLoaded(report.id)}
-                      onError={handleReportError(report.id)}
-                      height="300px"
-                      priority={report.priority}
-                      lazyLoad={report.lazyLoad}
-                      maxConcurrentLoads={3}
-                      resourceOptimization={{
-                        disableAnimations: report.priority === 'low',
-                        reduceQuality: report.priority === 'low',
-                        limitRefreshRate: true
-                      }}
-                      className={`optimized-embed priority-${report.priority}`}
-                      showLoadingState={true}
-                    />
-                  </PowerBIErrorBoundary>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+    const newReport: OptimizedReport = {
+      id: localReportId,
+      name: `${config.priority.toUpperCase()} - ${selection?.report?.name || `Workspace Report ${testRunIdRef.current}`}${config.lazyLoad ? " (Lazy)" : ""}`,
+      embedUrl: embedUrl,
+      accessToken: token,
+      workspaceName: selection?.workspace?.name || "Selected Workspace",
+      priority: config.priority,
+      lazyLoad: config.lazyLoad,
+      addedAt: new Date(),
+      // Store the actual Power BI report ID for embedding
+      powerBiReportId: selection?.report?.id
+    };
 
-      {/* Optimization Features Info */}
-      <div className="optimization-info">
-        <h3>🔧 Optimization Features</h3>
-        <div className="info-grid">
-          <div className="info-card">
-            <h4>🏗️ DOM Isolation</h4>
-            <p>Each report uses complete DOM separation to prevent React/PowerBI conflicts</p>
-          </div>
-          <div className="info-card">
-            <h4>📊 Multiple Reports</h4>
-            <p>Load multiple instances of the same or different reports safely</p>
-          </div>
-          <div className="info-card">
-            <h4>⚡ Priority System</h4>
-            <p>Reports load based on priority: High, Normal, Low</p>
-          </div>
-          <div className="info-card">
-            <h4>🔒 Stable Embedding</h4>
-            <p>Uses the proven EmbeddedPowerBIContainer for reliable report loading</p>
-          </div>
-        </div>
-      </div>
+    setOptimizedReports((prev: OptimizedReport[]) => {
+      const updated = [...prev, newReport];
+      return updated.sort((a, b) => {
+        const priorityOrder = { high: 0, normal: 1, low: 2 };
+        return priorityOrder[a.priority] - priorityOrder[b.priority];
+      });
+    });
 
-      {/* Technical Details */}
-      <div className="technical-details">
-        <h3>🛠️ Technical Details</h3>
-        <p>EmbeddedPowerBIContainer uses complete DOM detachment for stable multi-report embedding</p>
-        <p>Performance metrics are tracked in real-time for debugging and optimization</p>
-        <p>This approach prevents the "removeChild" DOM conflicts that can occur with complex embedding scenarios</p>
+    setIsWorkspaceBrowserOpen(false);
+    setPendingReportConfig(null); // Clear pending configuration
+    setCurrentTestRun((prev: number) => prev + 1);
+  };
+
+  const calculateAverageLoadTime = () => {
+    if (performanceMetrics.length === 0) return 0;
+    const total = performanceMetrics.reduce((sum, metric) => sum + metric.loadTime, 0);
+    return Math.round(total / performanceMetrics.length);
+  };
+
+  const getMetricsByPriority = (priority: "high" | "normal" | "low") => {
+    return performanceMetrics.filter((metric) => metric.priority === priority);
+  };
+
+  const resetPerformanceTest = () => {
+    setPerformanceMetrics([]);
+    setCurrentTestRun(1);
+    setOptimizedReports([]);
+    reportStartTimesRef.current.clear();
+    testRunIdRef.current = 0;
+    setEmbedError(null);
+  };
+
+  const startPerformanceTest = () => {
+    resetPerformanceTest();
+    
+    // Add reports with different priorities and lazy loading configurations
+    setTimeout(() => addOptimizedReport("high", false), 100);
+    setTimeout(() => addOptimizedReport("normal", false), 200);
+    setTimeout(() => addOptimizedReport("low", true), 300);
+    setTimeout(() => addOptimizedReport("high", true), 400);
+    setTimeout(() => addOptimizedReport("normal", true), 500);
+    
+    setCurrentTestRun((prev: number) => prev + 1);
+  };
+
+  const exportPerformanceData = () => {
+    const data = {
+      testRun: currentTestRun,
+      reports: optimizedReports.map((report) => ({
+        id: report.id,
+        name: report.name,
+        priority: report.priority,
+        lazyLoad: report.lazyLoad,
+        addedAt: report.addedAt.toISOString(),
+      })),
+      metrics: performanceMetrics.map((metric) => ({
+        loadTime: metric.loadTime,
+        priority: metric.priority,
+        lazyLoad: metric.lazyLoad,
+        timestamp: metric.timestamp.toISOString(),
+        totalReports: metric.totalReports,
+        activeReports: metric.activeReports,
+      })),
+      summary: {
+        totalTests: performanceMetrics.length,
+        averageLoadTime: calculateAverageLoadTime(),
+        highPriorityAvg: getMetricsByPriority("high").length > 0 
+          ? Math.round(getMetricsByPriority("high").reduce((sum, m) => sum + m.loadTime, 0) / getMetricsByPriority("high").length)
+          : 0,
+        normalPriorityAvg: getMetricsByPriority("normal").length > 0
+          ? Math.round(getMetricsByPriority("normal").reduce((sum, m) => sum + m.loadTime, 0) / getMetricsByPriority("normal").length)
+          : 0,
+        lowPriorityAvg: getMetricsByPriority("low").length > 0
+          ? Math.round(getMetricsByPriority("low").reduce((sum, m) => sum + m.loadTime, 0) / getMetricsByPriority("low").length)
+          : 0,
+      },
+    };
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `powerbi-performance-test-${currentTestRun}-${new Date().toISOString().split("T")[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const PerformanceStatsCard = ({ 
+    title, 
+    value, 
+    unit = "ms", 
+    color = "#0078d4" 
+  }: { 
+    title: string; 
+    value: number; 
+    unit?: string; 
+    color?: string; 
+  }) => (
+    <div style={{
+      background: "white",
+      border: `2px solid ${color}`,
+      borderRadius: "8px",
+      padding: "16px",
+      margin: "8px",
+      minWidth: "150px",
+      textAlign: "center",
+      boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+    }}>
+      <div style={{ fontSize: "14px", color: "#666", marginBottom: "8px" }}>{title}</div>
+      <div style={{ fontSize: "24px", fontWeight: "bold", color }}>
+        {value.toLocaleString()}{unit}
       </div>
     </div>
   );
-}
+
+  const AdvancedStatsTable = () => (
+    <div style={{ margin: "20px 0" }}>
+      <h3>Detailed Performance Metrics</h3>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", background: "white" }}>
+          <thead>
+            <tr style={{ background: "#f5f5f5" }}>
+              <th style={{ border: "1px solid #ddd", padding: "8px" }}>Load Time (ms)</th>
+              <th style={{ border: "1px solid #ddd", padding: "8px" }}>Priority</th>
+              <th style={{ border: "1px solid #ddd", padding: "8px" }}>Lazy Load</th>
+              <th style={{ border: "1px solid #ddd", padding: "8px" }}>Timestamp</th>
+            </tr>
+          </thead>
+          <tbody>
+            {performanceMetrics.map((metric, index) => (
+              <tr key={index}>
+                <td style={{ border: "1px solid #ddd", padding: "8px", textAlign: "center" }}>
+                  {metric.loadTime.toLocaleString()}
+                </td>
+                <td style={{ border: "1px solid #ddd", padding: "8px", textAlign: "center" }}>
+                  <span style={{
+                    padding: "4px 8px",
+                    borderRadius: "4px",
+                    background: metric.priority === "high" ? "#ff6b6b" : 
+                               metric.priority === "normal" ? "#4ecdc4" : "#95a5a6",
+                    color: "white",
+                    fontSize: "12px"
+                  }}>
+                    {metric.priority.toUpperCase()}
+                  </span>
+                </td>
+                <td style={{ border: "1px solid #ddd", padding: "8px", textAlign: "center" }}>
+                  {metric.lazyLoad ? "✓" : "✗"}
+                </td>
+                <td style={{ border: "1px solid #ddd", padding: "8px", textAlign: "center" }}>
+                  {metric.timestamp.toLocaleTimeString()}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  const toggleAnalysisMode = () => {
+    setIsAnalysisMode(!isAnalysisMode);
+  };
+
+  const renderOptimizedReport = (report: OptimizedReport) => (
+    <div key={report.id} style={{ marginBottom: "20px" }}>
+      <div style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "10px",
+        background: "#f8f9fa",
+        borderRadius: "8px 8px 0 0",
+        border: "1px solid #dee2e6",
+      }}>
+        <div>
+          <strong>{report.name}</strong>
+          <div style={{ fontSize: "12px", color: "#666" }}>
+            Priority: {report.priority} | Lazy Load: {report.lazyLoad ? "Yes" : "No"} | 
+            Added: {report.addedAt.toLocaleTimeString()}
+          </div>
+        </div>
+        <button
+          onClick={() => removeOptimizedReport(report.id)}
+          style={{
+            background: "#dc3545",
+            color: "white",
+            border: "none",
+            padding: "5px 10px",
+            borderRadius: "4px",
+            cursor: "pointer",
+          }}
+        >
+          Remove
+        </button>
+      </div>
+      <PowerBIErrorBoundary>
+        <EmbeddedPowerBIContainer
+          key={`${report.id}-${currentTestRun}`}
+          embedUrl={report.embedUrl}
+          accessToken={report.accessToken}
+          reportId={report.powerBiReportId || report.id}
+          onLoaded={(reportInstance) => handleReportLoaded(report.id, report.priority, report.lazyLoad)}
+          onError={(error) => handleReportError(report.id, error)}
+          height="400px"
+          lazyLoad={report.lazyLoad}
+          priority={report.priority}
+        />
+      </PowerBIErrorBoundary>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "20px" }}>
+      <h1>Multi-PowerBI Analysis (MPA) Test Page</h1>
+      <p>Test and analyze multiple PowerBI reports with different optimization strategies.</p>
+
+      {embedError && (
+        <div style={{
+          background: "#f8d7da",
+          color: "#721c24",
+          padding: "10px",
+          borderRadius: "4px",
+          marginBottom: "20px",
+          border: "1px solid #f5c6cb",
+        }}>
+          {embedError}
+          <button
+            onClick={() => setEmbedError(null)}
+            style={{
+              float: "right",
+              background: "transparent",
+              border: "none",
+              color: "#721c24",
+              cursor: "pointer",
+              fontSize: "16px",
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      <div style={{ marginBottom: "20px" }}>
+        <h2>Performance Dashboard</h2>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginBottom: "20px" }}>
+          <PerformanceStatsCard
+            title="Total Reports"
+            value={optimizedReports.length}
+            unit=""
+            color="#28a745"
+          />
+          <PerformanceStatsCard
+            title="Active Reports"
+            value={optimizedReports.length}
+            unit=""
+            color="#17a2b8"
+          />
+          <PerformanceStatsCard
+            title="Tests Completed"
+            value={performanceMetrics.length}
+            unit=""
+            color="#6f42c1"
+          />
+          <PerformanceStatsCard
+            title="Average Load Time"
+            value={calculateAverageLoadTime()}
+            unit="ms"
+            color="#fd7e14"
+          />
+          <PerformanceStatsCard
+            title="High Priority Avg"
+            value={getMetricsByPriority("high").length > 0 ? Math.round(
+              getMetricsByPriority("high").reduce((sum, m) => sum + m.loadTime, 0) / getMetricsByPriority("high").length
+            ) : 0}
+            unit="ms"
+            color="#dc3545"
+          />
+          <PerformanceStatsCard
+            title="Normal Priority Avg"
+            value={getMetricsByPriority("normal").length > 0 ? Math.round(
+              getMetricsByPriority("normal").reduce((sum, m) => sum + m.loadTime, 0) / getMetricsByPriority("normal").length
+            ) : 0}
+            unit="ms"
+            color="#28a745"
+          />
+          <PerformanceStatsCard
+            title="Low Priority Avg"
+            value={getMetricsByPriority("low").length > 0 ? Math.round(
+              getMetricsByPriority("low").reduce((sum, m) => sum + m.loadTime, 0) / getMetricsByPriority("low").length
+            ) : 0}
+            unit="ms"
+            color="#6c757d"
+          />
+        </div>
+      </div>
+
+      <div style={{ marginBottom: "20px" }}>
+        <h2>Control Panel</h2>
+        <p style={{ color: "#666", marginBottom: "15px" }}>
+          🎯 <strong>All priority buttons open workspace selection</strong> - Choose a report from your Power BI workspace and it will be added with the specified priority and settings.<br/>
+          🔄 <strong>Reload All Reports</strong> - Refreshes all embedded reports while keeping your selections (useful for performance testing or data refresh).
+        </p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginBottom: "20px" }}>
+          <button
+            onClick={() => addOptimizedReport("high", false)}
+            style={{
+              background: "#dc3545",
+              color: "white",
+              border: "none",
+              padding: "10px 20px",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            📊 Add High Priority Report
+          </button>
+          <button
+            onClick={() => addOptimizedReport("normal", false)}
+            style={{
+              background: "#28a745",
+              color: "white",
+              border: "none",
+              padding: "10px 20px",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            📈 Add Normal Priority Report
+          </button>
+          <button
+            onClick={() => addOptimizedReport("low", true)}
+            style={{
+              background: "#6c757d",
+              color: "white",
+              border: "none",
+              padding: "10px 20px",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            📉 Add Low Priority Report (Lazy)
+          </button>
+          <button
+            onClick={clearAllReports}
+            style={{
+              background: "#6c757d",
+              color: "white",
+              border: "none",
+              padding: "10px 20px",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            Clear All
+          </button>
+          <button
+            onClick={reloadAllReports}
+            style={{
+              background: "#007bff",
+              color: "white",
+              border: "none",
+              padding: "10px 20px",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            🔄 Reload All Reports
+          </button>
+          <button
+            onClick={startPerformanceTest}
+            style={{
+              background: "#fd7e14",
+              color: "white",
+              border: "none",
+              padding: "10px 20px",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            Start Performance Test
+          </button>
+          <button
+            onClick={exportPerformanceData}
+            style={{
+              background: "#6f42c1",
+              color: "white",
+              border: "none",
+              padding: "10px 20px",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+            disabled={performanceMetrics.length === 0}
+          >
+            Export Data
+          </button>
+          <button
+            onClick={toggleAnalysisMode}
+            style={{
+              background: isAnalysisMode ? "#28a745" : "#007bff",
+              color: "white",
+              border: "none",
+              padding: "10px 20px",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            {isAnalysisMode ? "Hide Analysis" : "Show Analysis"}
+          </button>
+        </div>
+      </div>
+
+      {isAnalysisMode && performanceMetrics.length > 0 && <AdvancedStatsTable />}
+
+      <div style={{ marginBottom: "20px" }}>
+        <h2>Embedded Reports (Test Run #{currentTestRun})</h2>
+        {optimizedReports.length === 0 ? (
+          <p style={{ color: "#666", fontStyle: "italic" }}>
+            No reports loaded. Use the control panel above to add reports and test performance.
+          </p>
+        ) : (
+          optimizedReports.map(renderOptimizedReport)
+        )}
+      </div>
+
+      {isWorkspaceBrowserOpen && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0,0,0,0.5)",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          zIndex: 1000,
+        }}>
+          <div style={{
+            background: "white",
+            padding: "20px",
+            borderRadius: "8px",
+            maxWidth: "80%",
+            maxHeight: "80%",
+            overflow: "auto",
+          }}>
+            {pendingReportConfig && (
+              <div style={{
+                marginBottom: "15px",
+                padding: "10px",
+                backgroundColor: "#e7f3ff",
+                borderRadius: "4px",
+                border: "1px solid #b3d9ff"
+              }}>
+                <strong>🎯 Selecting report for: {pendingReportConfig.priority.toUpperCase()} Priority{pendingReportConfig.lazyLoad ? " (Lazy Load)" : ""}</strong>
+              </div>
+            )}
+            <WorkspaceBrowser
+              onEmbedTokenGenerated={(token, embedUrl, selection) => {
+                handleWorkspaceSelection(token, embedUrl, selection);
+                setIsWorkspaceBrowserOpen(false);
+              }}
+            />
+            <button 
+              onClick={() => setIsWorkspaceBrowserOpen(false)}
+              style={{
+                marginTop: "10px",
+                padding: "8px 16px",
+                backgroundColor: "#666",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer"
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default MPATestPage;
